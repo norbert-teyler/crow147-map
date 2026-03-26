@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Inspecties Kaart</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background:#1a1a2e; color:#eee; }
+  #header { padding:14px 20px; background:#16213e; border-bottom:2px solid #0f3460; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  #header h1 { font-size:18px; font-weight:700; color:#e94560; margin-right:8px; }
+  #header .stat { font-size:12px; color:#aaa; background:#0f3460; padding:4px 10px; border-radius:12px; }
+  #controls { padding:10px 20px; background:#16213e; display:flex; gap:12px; flex-wrap:wrap; align-items:center; border-bottom:1px solid #0f3460; }
+  .ctrl-group { display:flex; flex-direction:column; gap:3px; }
+  .ctrl-group label { font-size:11px; color:#aaa; text-transform:uppercase; letter-spacing:.5px; }
+  select { background:#0f3460; color:#eee; border:1px solid #e94560; border-radius:6px; padding:5px 8px; font-size:12px; cursor:pointer; }
+  #legend { padding:10px 20px; background:#16213e; display:flex; gap:16px; align-items:center; flex-wrap:wrap; border-bottom:1px solid #0f3460; }
+  #legend .leg-title { font-size:11px; color:#aaa; text-transform:uppercase; }
+  .leg-item { display:flex; align-items:center; gap:5px; font-size:12px; }
+  .leg-dot { width:12px; height:12px; border-radius:50%; border:1px solid rgba(255,255,255,0.3); }
+  #map { height: calc(100vh - 140px); width:100%; position:relative; }
+  #count { font-size:12px; color:#e94560; font-weight:600; }
+  .toggle-btn { background:#0f3460; color:#eee; border:1px solid #e94560; border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; transition:all .2s; }
+  .toggle-btn.active { background:#e94560; color:#fff; }
+  .toggle-btn:hover { opacity:.85; }
+  .leaflet-popup-content-wrapper { background:#16213e; color:#eee; border:1px solid #e94560; border-radius:8px; }
+  .leaflet-popup-tip { background:#16213e; }
+  .popup-title { font-weight:700; font-size:13px; color:#e94560; margin-bottom:6px; }
+  .popup-row { font-size:12px; margin:2px 0; }
+  .popup-row span { color:#aaa; }
+  .kw-bar { height:6px; border-radius:3px; margin-top:6px; }
+  #zoom-indicator { position:absolute; bottom:30px; left:10px; z-index:1000; background:rgba(22,33,62,0.9); color:#e94560; border:1px solid #e94560; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:700; pointer-events:none; }
+  #loading-overlay { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:2000; background:rgba(22,33,62,0.95); border:1px solid #e94560; border-radius:10px; padding:24px 36px; text-align:center; font-size:14px; }
+  #loading-overlay .spin { font-size:28px; display:block; margin-bottom:10px; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>🗺️ Inspecties Kaart — Moerdijk</h1>
+  <div class="stat" id="count">Laden...</div>
+  <div class="stat" id="total-stat">–</div>
+</div>
+<div id="controls">
+  <div class="ctrl-group">
+    <label>Inspectietype</label>
+    <select id="filterBron" onchange="applyFilters()">
+      <option value="">Alle types</option>
+      <option value="Bermhoogte">Bermhoogte</option>
+      <option value="Fietspadcomfort (FCM)">Fietspadcomfort (FCM)</option>
+      <option value="Reflectie">Reflectie</option>
+      <option value="Stroefheid (PTV)">Stroefheid (PTV)</option>
+      <option value="Wegbeheer (CROW147)">Wegbeheer (CROW147)</option>
+      <option value="Weginspectie (CROW146b)">Weginspectie (CROW146b)</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>Assettype</label>
+    <select id="filterAsset" onchange="applyFilters()">
+      <option value="">Alle types</option>
+      <option value="Asfalt">Asfalt</option>
+      <option value="Berm">Berm</option>
+      <option value="Elementen">Elementen</option>
+      <option value="Elementverharding">Elementverharding</option>
+      <option value="Fietspad">Fietspad</option>
+      <option value="Markering">Markering</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>Kwaliteit</label>
+    <select id="filterKw" onchange="applyFilters()">
+      <option value="">Alle</option>
+      <option value="good">Goed (>= 0.8)</option>
+      <option value="medium">Matig (0.5 - 0.8)</option>
+      <option value="bad">Slecht (< 0.5)</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <label>Lagen</label>
+    <button class="toggle-btn active" id="btnWegdelen" onclick="toggleWegdelen()">🛣️ Wegen (OSM)</button>
+  </div>
+</div>
+<div id="legend">
+  <span class="leg-title">Kwaliteit:</span>
+  <div class="leg-item"><div class="leg-dot" style="background:#2ecc71"></div> Goed (>=0.8)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#f39c12"></div> Matig (0.5-0.8)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#e74c3c"></div> Slecht (<0.5)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#95a5a6"></div> Onbekend</div>
+</div>
+<div id="map">
+  <div id="loading-overlay">
+    <span class="spin">&#9881;&#65039;</span>
+    Inspectiedata laden...
+  </div>
+</div>
+<div id="zoom-indicator">🔍 Zoom: <span id="zoom-level">13</span></div>
+
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+const rawNames = urlParams.get('names') || '';
+const pbFilterNames = rawNames ? rawNames.split('|').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+
+if (pbFilterNames.length > 0) {
+  const badge = document.createElement('div');
+  badge.className = 'stat';
+  badge.style.color = '#e94560';
+  badge.textContent = 'Power BI filter: ' + pbFilterNames.length + ' straten';
+  document.getElementById('header').appendChild(badge);
+}
+
+const map = L.map('map').setView([51.6752, 4.5894], 13);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  maxZoom: 19
+}).addTo(map);
+
+function updateZoomIndicator() {
+  document.getElementById('zoom-level').textContent = map.getZoom();
+}
+map.on('zoomend', updateZoomIndicator);
+updateZoomIndicator();
+
+let wegdelenVisible = true;
+const wegdelenLayer = L.tileLayer(
+  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { opacity: 0.35, attribution: '&copy; OpenStreetMap contributors', maxZoom: 19, tileSize: 256 }
+);
+wegdelenLayer.addTo(map);
+
+const layerGroup = L.layerGroup().addTo(map);
+
+function toggleWegdelen() {
+  wegdelenVisible = !wegdelenVisible;
+  const btn = document.getElementById('btnWegdelen');
+  if (wegdelenVisible) {
+    wegdelenLayer.addTo(map);
+    layerGroup.addTo(map);
+    btn.classList.add('active');
+  } else {
+    map.removeLayer(wegdelenLayer);
+    btn.classList.remove('active');
+  }
+}
+
+function getColor(kw) {
+  if (kw === null || kw === undefined) return '#95a5a6';
+  if (kw >= 0.8) return '#2ecc71';
+  if (kw >= 0.5) return '#f39c12';
+  return '#e74c3c';
+}
+
+let allData = [];
+
+function applyFilters() {
+  const bron  = document.getElementById('filterBron').value;
+  const asset = document.getElementById('filterAsset').value;
+  const kw    = document.getElementById('filterKw').value;
+  layerGroup.clearLayers();
+  let count = 0;
+  const bounds = [];
+
+  allData.forEach(d => {
+    if (pbFilterNames.length > 0) {
+      if (!pbFilterNames.some(n => (d.sn || '').toLowerCase() === n)) return;
+    }
+    if (bron  && d.it !== bron)  return;
+    if (asset && d.at !== asset) return;
+    if (kw === 'good'   && (d.kw === null || d.kw < 0.8))                return;
+    if (kw === 'medium' && (d.kw === null || d.kw < 0.5 || d.kw >= 0.8)) return;
+    if (kw === 'bad'    && (d.kw === null || d.kw >= 0.5))                return;
+
+    const color = getColor(d.kw);
+    const circle = L.circleMarker([d.lat, d.lng], {
+      radius: 5, fillColor: color,
+      color: 'rgba(0,0,0,0.4)', weight: 0.5, opacity: 1, fillOpacity: 0.8
+    });
+
+    const kwPct = d.kw !== null ? Math.round(d.kw * 100) : null;
+    const kwBar = kwPct !== null ? '<div class="kw-bar" style="width:' + kwPct + '%; background:' + color + '; max-width:100%"></div>' : '';
+
+    circle.bindPopup(
+      '<div class="popup-title">' + (d.at || 'Inspectie') + '</div>' +
+      '<div class="popup-row"><span>Straatnaam:</span> ' + (d.sn || '-') + '</div>' +
+      '<div class="popup-row"><span>Inspectietype:</span> ' + d.it + '</div>' +
+      '<div class="popup-row"><span>Datum:</span> ' + d.dt + '</div>' +
+      '<div class="popup-row"><span>Score:</span> ' + (d.sc || '-') + '</div>' +
+      '<div class="popup-row"><span>Schade/gebrek:</span> ' + (d.sg || '-') + '</div>' +
+      '<div class="popup-row"><span>Kwaliteit:</span> ' + (kwPct !== null ? kwPct + '%' : '-') + '</div>' +
+      kwBar +
+      '<div class="popup-row" style="margin-top:4px"><span>Bron:</span> ' + d.bf + '</div>'
+    );
+
+    layerGroup.addLayer(circle);
+    bounds.push([d.lat, d.lng]);
+    count++;
+  });
+
+  document.getElementById('count').textContent = count.toLocaleString('nl-NL') + ' punten zichtbaar';
+  if (pbFilterNames.length > 0 && bounds.length > 0) {
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+  }
+}
+
+const DATA_URL = 'https://raw.githubusercontent.com/norbert-teyler/crow147-map/main/files_v1/inspecties_data.json';
+
+fetch(DATA_URL)
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(data => {
+    allData = data;
+    document.getElementById('loading-overlay').style.display = 'none';
+    document.getElementById('total-stat').textContent = 'Totaal: ' + data.length.toLocaleString('nl-NL') + ' punten';
+    applyFilters();
+  })
+  .catch(err => {
+    document.getElementById('loading-overlay').innerHTML =
+      '<span style="color:#e74c3c;font-size:22px">Error</span><br><small>' + err.message + '</small>';
+  });
+</script>
+</body>
+</html>
